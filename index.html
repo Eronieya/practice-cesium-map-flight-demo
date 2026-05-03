@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+  <title>Cesium</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.141/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.141/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <script src="flightData.js"></script>
+  <script src="token.js"></script>
+</head>
+
+<body>
+  <div id="cesiumContainer"></div>
+
+  <script>
+
+    (async () => {
+      // 设置Cesium Ion默认访问令牌（用于访问Cesium的在线资源）
+      Cesium.Ion.defaultAccessToken = cesiumAccessToken;
+
+      // 创建Cesium Viewer实例，启用地形和3D建筑 
+      const viewer = new Cesium.Viewer('cesiumContainer', {
+        terrain: Cesium.Terrain.fromWorldTerrain(),
+      });
+
+      // 异步加载3D建筑数据
+      const osmBuildings = await Cesium.createOsmBuildingsAsync();
+      viewer.scene.primitives.add(osmBuildings);
+
+      // 设置时间参数
+      const timeStepInSeconds = 30;
+      const totalSeconds = timeStepInSeconds * (flightData.length - 1); // 总时间长度为每个样本之间的时间间隔乘以样本数量减一
+      const start = Cesium.JulianDate.fromIso8601("2020-03-09T23:10:00Z"); // 设置起始时间
+      const stop = Cesium.JulianDate.addSeconds(start, totalSeconds, new Cesium.JulianDate()); // 计算结束时间
+      viewer.clock.startTime = start.clone(); // 设置时钟的起始时间
+      viewer.clock.stopTime = stop.clone(); // 设置时钟的结束时间
+      viewer.clock.currentTime = start.clone(); // 将当前时间设置为起始时间
+      viewer.timeline.zoomTo(start, stop); // 将时间轴缩放到起始和结束时间范围内
+      viewer.clock.multiplier = 50; // 设置时间流逝的速度（例如，50倍速）
+      viewer.clock.shouldAnimate = true; // 启动时钟动画
+
+      // 创建一个 SampledPositionProperty 来存储飞机的位置数据。
+      const positionProperty = new Cesium.SampledPositionProperty();
+
+      // 将飞行数据添加到 SampledPositionProperty 中，并在地图上显示飞机的位置。
+      for (let i = 0; i < flightData.length; i++) {
+        const dataPoint = flightData[i];
+
+        const time = Cesium.JulianDate.addSeconds(start, i * timeStepInSeconds, new Cesium.JulianDate());
+        const position = Cesium.Cartesian3.fromDegrees(dataPoint.longitude, dataPoint.latitude, dataPoint.height);
+        positionProperty.addSample(time, position);
+
+        // 在地图上显示飞行轨迹的位置，使用红色点表示。
+        viewer.entities.add({
+          description: `Location: (${dataPoint.longitude}, ${dataPoint.latitude}, ${dataPoint.height})`,
+          position: position,
+          point: { pixelSize: 10, color: Cesium.Color.RED }
+        });
+      }
+
+
+      //  加载飞机的3D模型并将其绑定到 SampledPositionProperty 上，以便它能够随时间变化的位置进行动画。
+      async function loadModel() {
+        const airplaneUri = await Cesium.IonResource.fromAssetId(4699512); // 替换为你自己的飞机模型资产ID
+        const airplaneEntity = viewer.entities.add({
+          availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({ start: start, stop: stop })]), // 设置实体的可用时间范围
+          position: positionProperty, // 将飞机的位置绑定到 SampledPositionProperty 上
+          model: { uri: airplaneUri }, // 使用从 Cesium Ion 获取的飞机模型资源
+          orientation: new Cesium.VelocityOrientationProperty(positionProperty), // 根据位置的变化自动计算飞机的朝向
+          path: new Cesium.PathGraphics({ width: 2 }) // 显示飞机的路径轨迹，设置路径宽度为2像素
+        });
+
+        viewer.trackedEntity = airplaneEntity; // 将视角跟踪到飞机实体，使其始终保持在视野中
+      }
+
+      loadModel();
+
+    })()
+  </script>
+</body>
+
+</html>
